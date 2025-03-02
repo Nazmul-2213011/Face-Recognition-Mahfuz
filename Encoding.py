@@ -1,61 +1,98 @@
+import cv2
 import face_recognition
 import os
 import pickle
-from PIL import Image
 
 # Path to the folder containing student images
 image_folder = "student_images"
-
-# Dictionary to store encodings and names
 face_encodings = {}
-print("Encoding faces...")
 
 # Define supported image formats
 supported_formats = ['.jpg', '.jpeg', '.png']
 
-# Loop through each student's folder
+# Initialize counters for detected and undetected faces
+detected_faces_count = 0
+undetected_faces_count = 0
+
+# Function to detect faces using OpenCV with more parameters for large or side faces
+def detect_faces_opencv(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Adjust the parameters for better face detection for large or moved faces
+    faces = face_classifier.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30), maxSize=(1000, 1000))
+    
+    return faces  # Returns bounding boxes of faces
+
+# Load OpenCV's Haar Cascade face detector
+face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+print("Starting face detection and encoding...")
+
+# Process images for face encoding
 for student_name in os.listdir(image_folder):
     student_path = os.path.join(image_folder, student_name)
+    
     if not os.path.isdir(student_path):
-        continue
+        continue  # Skip if not a folder
 
     print(f"Processing images for {student_name}...")
     encodings = []
 
-    # Loop through each image in the student's folder
     for image_name in os.listdir(student_path):
         image_path = os.path.join(student_path, image_name)
 
-        # Check if the image format is supported
+        # Check file format
         if not any(image_name.lower().endswith(fmt) for fmt in supported_formats):
-            print(f"Warning: Unsupported format for {image_name}. Skipping...")
+            print(f"Skipping unsupported file '{image_name}'")
             continue
 
         try:
-            # Load the image
-            image = face_recognition.load_image_file(image_path)
+            # Load image with OpenCV
+            frame = cv2.imread(image_path)
+            if frame is None:
+                print(f"Error: Could not read '{image_name}'. Skipping...")
+                continue
 
-            # Detect and encode the face
-            face_locations = face_recognition.face_locations(image)
-            face_encoding = face_recognition.face_encodings(image, face_locations)
+            # Detect faces using OpenCV (more flexibility with face size and position)
+            faces = detect_faces_opencv(frame)
+            if len(faces) == 0:
+                print(f"No face detected in '{image_name}'. Skipping...")
+                undetected_faces_count += 1  # Increment count for undetected faces
+                continue
 
-            # If a face is found, add the encoding
-            if face_encoding:
-                encodings.append(face_encoding[0])
+            # Convert to RGB for face_recognition
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Face detection using face_recognition (for encoding)
+            face_locations = face_recognition.face_locations(rgb_frame)
+            face_encodings_list = face_recognition.face_encodings(rgb_frame, face_locations)
+
+            if face_encodings_list:
+                encodings.append(face_encodings_list[0])
+                print(f"Encoded face from '{image_name}'")
+                detected_faces_count += 1  # Increment count for detected faces
             else:
-                print(f"Warning: No face detected in {image_name}. Skipping...")
+                print(f"Face detected but encoding failed for '{image_name}'.")
+                undetected_faces_count += 1  # Increment count for undetected faces
 
         except Exception as e:
-            print(f"Error processing {image_name}: {e}. Skipping...")
+            print(f"Error processing '{image_name}': {e}")
+            undetected_faces_count += 1  # Increment count for undetected faces
 
-    # Store the encodings for the student
     if encodings:
         face_encodings[student_name] = encodings
     else:
-        print(f"Warning: No valid encodings found for {student_name}.")
+        print(f"No valid encodings found for {student_name}. Skipping student.")
 
-# Save the encodings to a file for later use
-with open("face_encodings.pkl", "wb") as f:
-    pickle.dump(face_encodings, f)
+# Save encodings to file
+encoding_file = "face_encodings.pkl"
+try:
+    with open(encoding_file, "wb") as f:
+        pickle.dump(face_encodings, f)
+    print(f"Face encoding completed and saved to '{encoding_file}'")
+except Exception as e:
+    print(f"Error saving encodings: {e}")
 
-print("Face encoding completed and saved to 'face_encodings.pkl'")
+# Print the results
+print(f"\nTotal images with face detected: {detected_faces_count}")
+print(f"Total images with face NOT detected: {undetected_faces_count}")
